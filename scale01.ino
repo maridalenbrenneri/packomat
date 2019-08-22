@@ -2,6 +2,8 @@
 #include <LiquidCrystal.h>
 #include <Servo.h>
 
+
+// Pins
 #define DOUT  3
 #define CLK   2
 
@@ -15,21 +17,45 @@
 #define BUTTONS 0
 
 #define PIN_MOTOR 10
+#define PIN_DISPENSER 11
 
-HX711 scale;
-LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
-float calibration_weigth = 250.0;
-float calibration_factor = -86.42;
-long target_weight = 250;
-static char str[16];
 
+// Config
+#define WEIGHTS_SIZE 10
+#define SLOW_WEIGHT 50
+#define PROPORTIONAL_FACTOR 5
+
+#define SERVO_DISPENSER_OPEN   60
+#define SERVO_DISPENSER_CLOSED 90
+
+// States
+#define STATE_IDLE 0
+#define STATE_FILLING 1
+#define STATE_FULL 2
+#define STATE_EMPTYING 3
+
+#define MOTOR_STATE_OFF 0
+#define MOTOR_STATE_ON  0
+
+
+// Button IDs
 #define BTN_NONE  0
 #define BTN_RIGHT 1
 #define BTN_LEFT  2
 #define BTN_UP    3
 #define BTN_DOWN  4
 #define BTN_SEL   5
+
+HX711 scale;
+LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
+Servo dispenser;
+
+float calibration_weigth = 250.0;
+float calibration_factor = -86.42;
+long target_weight = 2500;
+static char str[16];
+static long weights[WEIGHTS_SIZE];
 
 byte smiley[8] = {
   B00000,
@@ -46,6 +72,8 @@ void setup() {
   Serial.begin(9600);
   scale.begin(DOUT, CLK);
   lcd.begin(16,2);
+  dispenser.attach(PIN_DISPENSER);
+  dispenser.write(SERVO_DISPENSER_CLOSED);
 
   digitalWrite(PIN_MOTOR, LOW);
   pinMode(PIN_MOTOR, OUTPUT);
@@ -57,38 +85,23 @@ void setup() {
   lcd.write(byte(0));
 
   // Need to wait a little for the taring to work well
-  delay(500);
+  delay(1000);
   scale.set_scale(calibration_factor);
   Serial.println("Taring...");
   scale.tare(5);
 }
 
-#define WEIGHTS_SIZE 10
-#define STOP_ITERATIONS 8
-#define STOP_WEIGHT 75
-
-#define STATE_IDLE 0
-#define STATE_FILLING 1
-#define STATE_FULL 2
-#define STATE_EMPTYING 3
-
 void loop() {
 
-  static long weights[WEIGHTS_SIZE];
   static long weightSum = 0;
   static uint8_t weightsIndex = 0;
   static uint8_t state = STATE_IDLE;
+  static uint8_t motorState = MOTOR_STATE_OFF;
+  static unsigned long dispenserOpenTime = 0;
   long weight;
   long avgWeight;
   long oldWeight;
   long rate;
-
-  if (state == STATE_FILLING){
-    digitalWrite(PIN_MOTOR, HIGH);
-  }
-  else {
-    digitalWrite(PIN_MOTOR, LOW);
-  }
 
   weight = scale.get_units(1);
   oldWeight = weights[weightsIndex];
@@ -97,36 +110,65 @@ void loop() {
   weights[weightsIndex] = weight;
   rate = (weight - oldWeight) / WEIGHTS_SIZE;
 
-  if (state == STATE_FILLING){
-    // if ((weight + rate * STOP_ITERATIONS) > (target_weight * 10)){
-    if (weight + STOP_WEIGHT * 10  > target_weight * 10){
-      state = STATE_FULL;
-    }
-  }
-
   ++weightsIndex;
   if (weightsIndex >= WEIGHTS_SIZE){
     weightsIndex = 0;
   }
+ 
+  avgWeight = weightSum / WEIGHTS_SIZE;
 
-  // Serial.println(weight);
-  // Serial.print(" ");
-  // Serial.println(rate / 10.0f);
-  
-  weight = weightSum / WEIGHTS_SIZE;
+  if (state == STATE_FILLING){
 
+    int diff = target_weight - weight;
 
-  bool negative = (weight < 0);
-  if (negative){
-    weight = -weight;
+    if (diff <= 0) {
+
+      if (avgWeight > target_weight){
+        state = STATE_FULL;
+      }
+      digitalWrite(PIN_MOTOR, LOW);
+    }
+    else if (diff < SLOW_WEIGHT * 10){
+      // Serial.print("Slow: ");
+      // Serial.print(diff);
+      // Serial.print(" ");
+      // Serial.print(weightsIndex);
+      // Serial.print(" ");
+      // Serial.println(max(diff / 50, 1));
+      if (weightsIndex < max(diff / 50, 1)){
+        digitalWrite(PIN_MOTOR, HIGH);
+      }
+      else {
+        digitalWrite(PIN_MOTOR, LOW);
+      }
+    }
+    else {
+      digitalWrite(PIN_MOTOR, HIGH);
+    }
   }
-  long dec = weight % 10;
-  weight /= 10;
+  else {
+    digitalWrite(PIN_MOTOR, LOW);
+  }
+
+  if (millis() - dispenserOpenTime > 1500UL){
+    if (dispenser.read() == SERVO_DISPENSER_OPEN){
+      dispenser.write(SERVO_DISPENSER_CLOSED);
+      delay(100);
+      state = STATE_FILLING;
+    }
+  }
+
+  bool negative = (avgWeight < 0);
+  if (negative){
+    avgWeight = -avgWeight;
+  }
+  long dec = avgWeight % 10;
+  avgWeight /= 10;
   if (weightsIndex == 0){
     if(negative){
       Serial.print("-");
     }
-    Serial.print(weight, 10);
+    Serial.print(avgWeight, 10);
     Serial.print(".");
     Serial.println(dec, 10);
   }
@@ -140,7 +182,7 @@ void loop() {
     else {
       lcd.write(' ');
     }
-    sprintf(str, "%04d.", weight);
+    sprintf(str, "%04d.", avgWeight);
     lcd.print(str);
     sprintf(str, "%1d g", dec);
     lcd.print(str);
@@ -151,40 +193,15 @@ void loop() {
     lcd.setCursor(15, 1);
     lcd.print(state);
   }
-  // lcd.print(" g");
-  // Serial.println(str);  
-  // delay(1000);
-
-/* 
-  Serial.print("Reading: ");
-  Serial.print(weight, 2);
-  Serial.print(" kg"); //Change this to kg and re-adjust the calibration factor if you follow SI units like a sane person
-  Serial.print(" calibration_factor: ");
-  Serial.print(calibration_factor);
-  Serial.println();
-*/
-
-  // delay(1000);
-//  lcd.noDisplay();
-  // delay(1000);
-//  lcd.display();
-/* 
-  if(Serial.available())
-  {
-    char temp = Serial.read();
-    if(temp == '+' || temp == 'a')
-      calibration_factor += 1000;
-    else if(temp == '-' || temp == 'z')
-      calibration_factor -= 1000;
-    scale.set_scale(calibration_factor); //Adjust to this calibration factor
-  }
-*/
 
   char btn = getButtonRelease();
-  if (btn == BTN_SEL || btn == BTN_RIGHT){
+  if (btn == BTN_RIGHT){
     tareCalibrate(btn == BTN_SEL);
   }
-  else if (btn == BTN_DOWN){
+  else if (btn == BTN_SEL){
+    digitalWrite(PIN_MOTOR, HIGH);
+  }
+  else if (btn == BTN_LEFT){
     if (state == STATE_IDLE){
       state = STATE_FILLING;
     }
@@ -192,39 +209,47 @@ void loop() {
       state = STATE_IDLE;
     }
   }
-  
+  else if (btn == BTN_DOWN){
+    Serial.println("Dispenser Open");
+    dispenser.write(SERVO_DISPENSER_OPEN);
+    dispenserOpenTime = millis();
+
+    Serial.println(millis());
+  }
 }
 
 
 bool tareCalibrate(bool calibrate){
 
+  lcd.setCursor(0,0);
+  lcd.print("Tare...   ");
+  lcd.blink();
+
+  scale.tare(20);
+  
+  lcd.noBlink();
+  lcd.clear();
+  
+  Serial.print("Tare offset: ");
+  Serial.println(scale.get_offset());
+
+  if (calibrate){
     lcd.setCursor(0,0);
-    lcd.print("Tare...   ");
-    lcd.blink();
-    // scale.set_scale();
-    scale.tare(20);
-    lcd.noBlink();
-    Serial.print("Tare offset: ");
-    Serial.println(scale.get_offset());
+    lcd.print("Add CAL bag!");
+    lcd.setCursor(0,1);
+    lcd.print("And press SEL...");
+    while (getButton() == BTN_SEL);
+    while (getButton() != BTN_SEL);
     lcd.clear();
 
-    if (calibrate){
-      lcd.setCursor(0,0);
-      lcd.print("Add CAL bag!");
-      lcd.setCursor(0,1);
-      lcd.print("And press SEL...");
-      while (getButton() == BTN_SEL);
-      while (getButton() != BTN_SEL);
-      lcd.clear();
-
-      float m = scale.read_average(20);
-      Serial.print("Meas: ");
-      Serial.println(m, 2);
-      calibration_factor = (m - scale.get_offset()) / calibration_weigth / 10;
-      scale.set_scale(calibration_factor);
-      Serial.print("Calibration: ");
-      Serial.println(calibration_factor, 10);
-    }
+    float m = scale.read_average(20);
+    Serial.print("Meas: ");
+    Serial.println(m, 2);
+    calibration_factor = (m - scale.get_offset()) / calibration_weigth / 10;
+    scale.set_scale(calibration_factor);
+    Serial.print("Calibration: ");
+    Serial.println(calibration_factor, 10);
+  }
 }
 
 char getButtonRelease(){
@@ -236,11 +261,11 @@ char getButtonRelease(){
 
 char getButton(){
   int x;
-  x = analogRead(BUTTONS);                  // Read the analog value for buttons
-  if (x < 100) {                       // Right button is pressed
+  x = analogRead(BUTTONS);
+  if (x < 100) {
     return BTN_RIGHT; 
   }
-  else if (x < 200) {                  // Up button is pressed
+  else if (x < 200) {
     return BTN_UP;
   }
   else if (x < 400){
