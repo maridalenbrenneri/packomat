@@ -4,11 +4,11 @@
 
 
 // Pins
-#define DOUT  3
-#define CLK   2
+#define SCALE_DOUT  9
+#define SCALE_CLK   8
 
-#define LCD_RS 8
-#define LCD_E  9
+#define LCD_RS A2
+#define LCD_E  A1
 #define LCD_D7 7
 #define LCD_D6 6
 #define LCD_D5 5
@@ -19,6 +19,7 @@
 #define PIN_MOTOR 10
 #define PIN_DISPENSER 11
 
+#define PIN_DISPENSE_BUTTON 2
 
 
 // Config
@@ -26,8 +27,8 @@
 #define SLOW_WEIGHT 50
 #define PROPORTIONAL_FACTOR 5
 
-#define SERVO_DISPENSER_OPEN   60
-#define SERVO_DISPENSER_CLOSED 90
+#define SERVO_DISPENSER_OPEN   40
+#define SERVO_DISPENSER_CLOSED 70
 
 // States
 #define STATE_IDLE 0
@@ -54,8 +55,11 @@ Servo dispenser;
 float calibration_weigth = 250.0;
 float calibration_factor = -86.42;
 long target_weight = 2500;
-static char str[16];
-static long weights[WEIGHTS_SIZE];
+char str[16];
+long weights[WEIGHTS_SIZE];
+volatile bool dispensePressed = false;
+
+void buttonPress(void);
 
 byte smiley[8] = {
   B00000,
@@ -70,13 +74,16 @@ byte smiley[8] = {
 void setup() {
 
   Serial.begin(9600);
-  scale.begin(DOUT, CLK);
+  scale.begin(SCALE_DOUT, SCALE_CLK);
   lcd.begin(16,2);
   dispenser.attach(PIN_DISPENSER);
   dispenser.write(SERVO_DISPENSER_CLOSED);
 
   digitalWrite(PIN_MOTOR, LOW);
   pinMode(PIN_MOTOR, OUTPUT);
+
+  pinMode(PIN_DISPENSE_BUTTON, INPUT);
+  attachInterrupt(digitalPinToInterrupt(PIN_DISPENSE_BUTTON), buttonPress, RISING);
 
   lcd.createChar(0, smiley);
   lcd.setCursor(0,0);
@@ -89,6 +96,9 @@ void setup() {
   scale.set_scale(calibration_factor);
   Serial.println("Taring...");
   scale.tare(5);
+
+  dispenser.detach();
+
 }
 
 void loop() {
@@ -114,7 +124,7 @@ void loop() {
   if (weightsIndex >= WEIGHTS_SIZE){
     weightsIndex = 0;
   }
- 
+
   avgWeight = weightSum / WEIGHTS_SIZE;
 
   if (state == STATE_FILLING){
@@ -151,9 +161,10 @@ void loop() {
   }
 
   if (millis() - dispenserOpenTime > 1500UL){
-    if (dispenser.read() == SERVO_DISPENSER_OPEN){
+    if (dispenser.attached()){
       dispenser.write(SERVO_DISPENSER_CLOSED);
       delay(100);
+      dispenser.detach();
       state = STATE_FILLING;
     }
   }
@@ -209,8 +220,11 @@ void loop() {
       state = STATE_IDLE;
     }
   }
-  else if (btn == BTN_DOWN){
+
+  if (state == STATE_FULL && dispensePressed){
+    dispensePressed = false;
     Serial.println("Dispenser Open");
+    dispenser.attach(PIN_DISPENSER);
     dispenser.write(SERVO_DISPENSER_OPEN);
     dispenserOpenTime = millis();
 
@@ -280,4 +294,8 @@ char getButton(){
   else {
     return BTN_NONE;
   }
+}
+
+void buttonPress(void){
+  dispensePressed = true;
 }
