@@ -3,6 +3,16 @@
 #include <Servo.h>
 
 
+// Config
+#define TARGET_WEIGHT 250
+#define SLOW_WEIGHT   100 // The vibration will start pulsing with this amount of grams remaining
+#define PULSE_LENGTH  1   // How long is each pulse? 1 - 10 (10 = continuous)
+
+#define DISPENSER_OPEN_TIME    (TARGET_WEIGHT * 5UL)
+#define SERVO_DISPENSER_OPEN   40
+#define SERVO_DISPENSER_CLOSED 70
+
+
 // Pins
 #define SCALE_DOUT  9
 #define SCALE_CLK   8
@@ -20,15 +30,6 @@
 #define PIN_DISPENSER 11
 
 #define PIN_DISPENSE_BUTTON 2
-
-
-// Config
-#define WEIGHTS_SIZE 10
-#define SLOW_WEIGHT 50
-#define PROPORTIONAL_FACTOR 5
-
-#define SERVO_DISPENSER_OPEN   40
-#define SERVO_DISPENSER_CLOSED 70
 
 // States
 #define STATE_IDLE 0
@@ -48,13 +49,17 @@
 #define BTN_DOWN  4
 #define BTN_SEL   5
 
+// Internal Config
+#define WEIGHTS_SIZE 10
+
+
 HX711 scale;
 LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 Servo dispenser;
 
-float calibration_weigth = 250.0;
-float calibration_factor = -86.42;
-long target_weight = 2500;
+float calibration_weight = 250.0f;
+float calibration_factor = -86.42f;
+long target_weight = (TARGET_WEIGHT) * 10;
 char str[16];
 long weights[WEIGHTS_SIZE];
 volatile bool dispensePressed = false;
@@ -139,13 +144,8 @@ void loop() {
       digitalWrite(PIN_MOTOR, LOW);
     }
     else if (diff < SLOW_WEIGHT * 10){
-      // Serial.print("Slow: ");
-      // Serial.print(diff);
-      // Serial.print(" ");
-      // Serial.print(weightsIndex);
-      // Serial.print(" ");
-      // Serial.println(max(diff / 50, 1));
-      if (weightsIndex < max(diff / 50, 1)){
+      // Pulse motor
+      if (weightsIndex < (PULSE_LENGTH)){
         digitalWrite(PIN_MOTOR, HIGH);
       }
       else {
@@ -160,7 +160,7 @@ void loop() {
     digitalWrite(PIN_MOTOR, LOW);
   }
 
-  if (millis() - dispenserOpenTime > 1500UL){
+  if (millis() - dispenserOpenTime > (DISPENSER_OPEN_TIME)){
     if (dispenser.attached()){
       dispenser.write(SERVO_DISPENSER_CLOSED);
       delay(100);
@@ -184,7 +184,6 @@ void loop() {
     Serial.println(dec, 10);
   }
 
-  // dtostrf(weight, 6, 2, str);
   if ((weightsIndex % 2) == 0){
     lcd.setCursor(0, 0);
     if(negative){
@@ -259,7 +258,7 @@ bool tareCalibrate(bool calibrate){
     float m = scale.read_average(20);
     Serial.print("Meas: ");
     Serial.println(m, 2);
-    calibration_factor = (m - scale.get_offset()) / calibration_weigth / 10;
+    calibration_factor = (m - scale.get_offset()) / calibration_weight / 10;
     scale.set_scale(calibration_factor);
     Serial.print("Calibration: ");
     Serial.println(calibration_factor, 10);
