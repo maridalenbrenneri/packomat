@@ -5,10 +5,9 @@
 
 // Config
 #define TARGET_WEIGHT 250
-#define SLOW_WEIGHT   100 // The vibration will start pulsing with this amount of grams remaining
+#define SLOW_WEIGHT   80  // The vibration will start pulsing with this amount of grams remaining
 #define PULSE_LENGTH  1   // How long is each pulse? 1 - 10 (10 = continuous)
 
-#define DISPENSER_OPEN_TIME    (TARGET_WEIGHT * 5UL)
 #define SERVO_DISPENSER_OPEN   40
 #define SERVO_DISPENSER_CLOSED 70
 
@@ -32,10 +31,12 @@
 #define PIN_DISPENSE_BUTTON 2
 
 // States
-#define STATE_IDLE 0
-#define STATE_FILLING 1
-#define STATE_FULL 2
+#define STATE_IDLE     0
+#define STATE_FILLING  1
+#define STATE_FULL     2
 #define STATE_EMPTYING 3
+#define STATE_MENU     4
+#define STATE_MENU_2   5
 
 #define MOTOR_STATE_OFF 0
 #define MOTOR_STATE_ON  0
@@ -51,7 +52,18 @@
 
 // Internal Config
 #define WEIGHTS_SIZE 10
+#define CHAR_PLAY  1
+#define CHAR_PAUSE 2
+#define CHAR_DOWN  3
 
+#define MENU_SIZE    5
+const char * menu[MENU_SIZE] = {
+  "Fill 250 g",
+  "Fill 500 g",
+  "Fill 1.2 kg",
+  "Tare",
+  "Calibrate"
+};
 
 HX711 scale;
 LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
@@ -60,6 +72,7 @@ Servo dispenser;
 float calibration_weight = 250.0f;
 float calibration_factor = -86.42f;
 long target_weight = (TARGET_WEIGHT) * 10;
+uint8_t state = STATE_MENU;
 char str[16];
 long weights[WEIGHTS_SIZE];
 volatile bool dispensePressed = false;
@@ -74,6 +87,37 @@ byte smiley[8] = {
   B00000,
   B10001,
   B01110,
+};
+
+byte char_play[8] = {
+  B00000,
+  B10000,
+  B11000,
+  B11100,
+  B11110,
+  B11100,
+  B11000,
+  B10000,
+};
+byte char_pause[8] = {
+  B00000,
+  B00000,
+  B11011,
+  B11011,
+  B11011,
+  B11011,
+  B11011,
+  B11011,
+};
+byte char_down[8] = {
+  B00000,
+  B00000,
+  B11111,
+  B01110,
+  B01110,
+  B00100,
+  B00100,
+  B00000,
 };
 
 void setup() {
@@ -91,6 +135,9 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_DISPENSE_BUTTON), buttonPress, RISING);
 
   lcd.createChar(0, smiley);
+  lcd.createChar(CHAR_PLAY, char_play);
+  lcd.createChar(CHAR_PAUSE, char_pause);
+  lcd.createChar(CHAR_DOWN, char_down);
   lcd.setCursor(0,0);
   lcd.print("Taring...");
   lcd.setCursor(0,1);
@@ -103,14 +150,74 @@ void setup() {
   scale.tare(5);
 
   dispenser.detach();
-
 }
 
 void loop() {
+  if (state == STATE_MENU || state == STATE_MENU_2){
+    handleMenu();
+  }
+  else {
+    handleFilling();
+  }
+}
+
+void handleMenu(void){
+
+  static uint8_t menuIdx;
+
+  if (state == STATE_MENU){
+    menuIdx = 0;
+    drawMenu(menuIdx);
+    state = STATE_MENU_2;
+  }
+  
+  char btn = getButtonRelease();
+  if (btn == BTN_DOWN){
+    menuIdx++;
+    menuIdx %= MENU_SIZE;
+    drawMenu(menuIdx);
+  }
+  else if (btn == BTN_UP){
+    if (menuIdx == 0){
+      menuIdx = MENU_SIZE;
+    }
+    menuIdx--;
+    drawMenu(menuIdx);
+  }
+  else if (btn == BTN_SEL){
+    switch (menuIdx)
+    {
+    case 0:
+      target_weight = 2500;
+      state = STATE_IDLE;
+      break;
+    case 1:
+      target_weight = 5000;
+      state = STATE_IDLE;
+      break;
+    case 2:
+      target_weight = 12000;
+      state = STATE_IDLE;
+      break;
+    case 3:
+      tareCalibrate(false);
+      state = STATE_MENU;
+      break;
+    case 4:
+      tareCalibrate(true);
+      state = STATE_MENU;
+      break;
+    default:
+      break;
+    }
+    lcd.clear();
+  }
+}
+
+void handleFilling(void){
 
   static long weightSum = 0;
   static uint8_t weightsIndex = 0;
-  static uint8_t state = STATE_IDLE;
   static uint8_t motorState = MOTOR_STATE_OFF;
   static unsigned long dispenserOpenTime = 0;
   long weight;
@@ -160,7 +267,8 @@ void loop() {
     digitalWrite(PIN_MOTOR, LOW);
   }
 
-  if (millis() - dispenserOpenTime > (DISPENSER_OPEN_TIME)){
+  // Open 5 ms per gram
+  if (millis() - dispenserOpenTime > (target_weight * 5 / 10)){
     if (dispenser.attached()){
       dispenser.write(SERVO_DISPENSER_CLOSED);
       delay(100);
@@ -198,26 +306,38 @@ void loop() {
     lcd.print(str);
 
     lcd.setCursor(0, 1);
-    lcd.print(rate / 10.0f);
+    sprintf(str, "\x7E%04d.0 g", target_weight/10);
+    lcd.print(str);
 
-    lcd.setCursor(15, 1);
-    lcd.print(state);
+    lcd.setCursor(14, 1);
+    if (dispensePressed){
+      lcd.write(byte(CHAR_DOWN));
+    }
+    else {
+      lcd.print(" ");
+    }
+    if (state == STATE_FILLING){
+      lcd.write(byte(CHAR_PLAY));
+    }
+    else {
+      lcd.write(byte(CHAR_PAUSE));
+    }
+    // lcd.print(state);
   }
 
   char btn = getButtonRelease();
-  if (btn == BTN_RIGHT){
-    tareCalibrate(btn == BTN_SEL);
-  }
-  else if (btn == BTN_SEL){
-    digitalWrite(PIN_MOTOR, HIGH);
-  }
-  else if (btn == BTN_LEFT){
+  if (btn == BTN_SEL){
+    dispensePressed = false;
     if (state == STATE_IDLE){
       state = STATE_FILLING;
     }
     else {
       state = STATE_IDLE;
     }
+  }
+  else if (btn == BTN_RIGHT){
+    digitalWrite(PIN_MOTOR, LOW);
+    state = STATE_MENU;
   }
 
   if (state == STATE_FULL && dispensePressed){
@@ -231,9 +351,18 @@ void loop() {
   }
 }
 
+void drawMenu(uint8_t menuIdx){
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("\x7E");
+  lcd.print(menu[menuIdx]);
+  lcd.setCursor(1, 1);
+  lcd.print(menu[(menuIdx + 1) % MENU_SIZE]);
+}
 
 bool tareCalibrate(bool calibrate){
-
+  
+  lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Tare...   ");
   lcd.blink();
