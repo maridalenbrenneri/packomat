@@ -5,7 +5,8 @@
 
 // Config
 #define TARGET_WEIGHT 250
-#define SLOW_WEIGHT   80  // The vibration will start pulsing with this amount of grams remaining
+#define SLOW_WEIGHT   80  // The vibration slows down from this amount of grams remaining
+#define PULSE_WEIGHT  10  // The vibration will start pulsing with this amount of grams remaining
 #define PULSE_LENGTH  1   // How long is each pulse? 1 - 10 (10 = continuous)
 
 #define SERVO_DISPENSER_OPEN   40
@@ -25,7 +26,7 @@
 
 #define BUTTONS 0
 
-#define PIN_MOTOR 10
+#define PIN_MOTOR 3
 #define PIN_DISPENSER 11
 
 #define PIN_DISPENSE_BUTTON 2
@@ -70,7 +71,7 @@ LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 Servo dispenser;
 
 float calibration_weight = 250.0f;
-float calibration_factor = -86.42f;
+float calibration_factor = -86.69f;
 long target_weight = (TARGET_WEIGHT) * 10;
 uint8_t state = STATE_MENU;
 char str[16];
@@ -250,7 +251,7 @@ void handleFilling(void){
       }
       digitalWrite(PIN_MOTOR, LOW);
     }
-    else if (diff < SLOW_WEIGHT * 10){
+    else if (diff < PULSE_WEIGHT * 10){
       // Pulse motor
       if (weightsIndex < (PULSE_LENGTH)){
         digitalWrite(PIN_MOTOR, HIGH);
@@ -258,6 +259,13 @@ void handleFilling(void){
       else {
         digitalWrite(PIN_MOTOR, LOW);
       }
+    }
+    else if (diff < SLOW_WEIGHT * 10){
+      int power = map(diff, PULSE_WEIGHT * 10, SLOW_WEIGHT * 10, 160, 255);
+      // Serial.print(diff);
+      // Serial.print(" -> ");
+      // Serial.println(power);
+      analogWrite(PIN_MOTOR, power);
     }
     else {
       digitalWrite(PIN_MOTOR, HIGH);
