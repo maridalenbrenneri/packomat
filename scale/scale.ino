@@ -39,9 +39,6 @@
 #define STATE_MENU     4
 #define STATE_MENU_2   5
 
-#define MOTOR_STATE_OFF 0
-#define MOTOR_STATE_ON  0
-
 
 // Button IDs
 #define BTN_NONE  0
@@ -219,7 +216,6 @@ void handleFilling(void){
 
   static long weightSum = 0;
   static uint8_t weightsIndex = 0;
-  static uint8_t motorState = MOTOR_STATE_OFF;
   static unsigned long dispenserOpenTime = 0;
   long weight;
   long avgWeight;
