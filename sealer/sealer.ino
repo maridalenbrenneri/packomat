@@ -2,18 +2,19 @@
 
 
 // Config
-#define TIME_CLOSE 1100
-#define TIME_SEAL  2000
-#define TIME_OPEN  1000
+#define TIME_CLOSE 4300
+#define TIME_SEAL  3200
+#define TIME_OPEN  4000
 
-#define SERVO_EJECT_OPEN   0
-#define SERVO_EJECT_CLOSED 0
+#define SERVO_EJECT_OPEN   10
+#define SERVO_EJECT_CLOSED 90
 
 // Pins
 #define PIN_START_BUTTON 2
-#define PIN_MOTOR        3
-#define PIN_MOTOR_DIR    4
-#define PIN_SERVO_EJECT  5
+#define PIN_MOTOR_OUT    3
+#define PIN_MOTOR_IN     4
+#define PIN_HEATER       5
+#define PIN_SERVO_EJECT  11
 
 // States
 #define STATE_IDLE     0
@@ -34,26 +35,79 @@ void buttonPress(void);
 void setup() {
 
   Serial.begin(9600);
+  Serial.println("Boot");
   ejecter.attach(PIN_SERVO_EJECT);
   ejecter.write(SERVO_EJECT_CLOSED);
+  
+  digitalWrite(PIN_MOTOR_IN, HIGH);
+  digitalWrite(PIN_MOTOR_OUT, HIGH);
+  digitalWrite(PIN_HEATER, LOW);
 
-  digitalWrite(PIN_MOTOR, LOW);
-  pinMode(PIN_MOTOR, OUTPUT);
+  pinMode(PIN_MOTOR_IN, OUTPUT);
+  pinMode(PIN_MOTOR_OUT, OUTPUT);
+  pinMode(PIN_HEATER, OUTPUT);
 
   pinMode(PIN_START_BUTTON, INPUT);
   attachInterrupt(digitalPinToInterrupt(PIN_START_BUTTON), buttonPress, RISING);
 
+  delay(1000);
   ejecter.detach();
 }
 
 void loop() {
-  if {
-    handleFilling();
+  static long lastEvent;
+  switch (state)
+  {
+  case STATE_IDLE:
+    if (buttonPressed){
+      Serial.println("Closing");
+      state = STATE_CLOSING;
+      lastEvent = millis();
+      digitalWrite(PIN_MOTOR_IN, LOW);
+    }
+    break;
+
+  case STATE_CLOSING:
+    buttonPressed = false;
+    if (millis() - lastEvent > TIME_CLOSE){
+      Serial.println("Sealing");
+      state = STATE_SEALING;
+      digitalWrite(PIN_MOTOR_IN, HIGH);
+      digitalWrite(PIN_HEATER, HIGH);
+      lastEvent = millis();
+    }
+    break;
+
+  case STATE_SEALING:
+    if (millis() - lastEvent > TIME_SEAL){
+      Serial.println("Opening");
+      state = STATE_OPENING;
+      digitalWrite(PIN_MOTOR_OUT, LOW);
+      digitalWrite(PIN_HEATER, LOW);
+      lastEvent = millis();
+    }
+    break;
+    
+  case STATE_OPENING:
+    if (millis() - lastEvent > TIME_OPEN){
+      Serial.println("Eject");
+      state = STATE_EJECT;
+      digitalWrite(PIN_MOTOR_OUT, HIGH);
+      lastEvent = millis();
+    }
+    break;
+
+  case STATE_EJECT:
+    ejecter.attach(PIN_SERVO_EJECT);
+    ejecter.write(SERVO_EJECT_OPEN);
+    delay(700);
+    ejecter.write(SERVO_EJECT_CLOSED);
+    delay(900);
+    ejecter.detach();
+    state = STATE_IDLE;
+    break;
+    
   }
-}
-
-void handleFilling(void){
-
 }
 
 void buttonPress(void){
