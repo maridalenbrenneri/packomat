@@ -2,10 +2,9 @@
 
 
 // Config
-#define TIME_CLOSE 4300
-#define TIME_CLOSE_HEAT_ON (TIME_CLOSE - 1000)
-#define TIME_SEAL  2600
-#define TIME_OPEN  4000
+#define TIME_CLOSE 500
+#define TIME_SEAL  3200
+#define TIME_OPEN  250
 
 #define SERVO_EJECT_OPEN   10
 #define SERVO_EJECT_CLOSED 90
@@ -65,14 +64,12 @@ void loop() {
       state = STATE_CLOSING;
       lastEvent = millis();
       digitalWrite(PIN_MOTOR_IN, LOW);
+      digitalWrite(PIN_HEATER, HIGH);
     }
     break;
 
   case STATE_CLOSING:
     buttonPressed = false;
-    if (millis() - lastEvent > TIME_CLOSE_HEAT_ON){
-      digitalWrite(PIN_HEATER, HIGH);
-    }
     if (millis() - lastEvent > TIME_CLOSE){
       Serial.println("Sealing");
       state = STATE_SEALING;
